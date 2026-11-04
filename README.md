@@ -7,7 +7,7 @@ from your own config file, while everything local keeps working.
 ## Install / update (same command for both)
 
 ```bash
-curl -fsSL -o /tmp/wg-vpn-gateway.zip https://raw.githubusercontent.com/AngelGonePro/wg-vpn-gateway/refs/heads/main/wg-vpn-gateway.zip && python3 -c "import zipfile;open('/tmp/wg-vpn-deploy.sh','wb').write(zipfile.ZipFile('/tmp/wg-vpn-gateway.zip').read('wg-vpn-gateway/deploy-update.sh'))" && bash /tmp/wg-vpn-deploy.sh /tmp/wg-vpn-gateway.zip ~/wg-vpn-gateway
+curl -fsSL -o /tmp/wg-vpn-gateway.zip https://github.com/AngelGonePro/wireguard-upstream-vpn/raw/refs/heads/main/wg-vpn-gateway.zip && python3 -c "import zipfile;open('/tmp/wg-vpn-deploy.sh','wb').write(zipfile.ZipFile('/tmp/wg-vpn-gateway.zip').read('wg-vpn-gateway/deploy-update.sh'))" && bash /tmp/wg-vpn-deploy.sh /tmp/wg-vpn-gateway.zip ~/wg-vpn-gateway
 ```
 
 1. **First run** puts the project in `~/wg-vpn-gateway` and stops, because
@@ -24,7 +24,7 @@ doesn't come up healthy, the gateway is stopped again so the VM goes back to
 direct routing rather than pointing at a dead tunnel.
 
 From inside an existing install you can also run
-`./deploy-update.sh https://raw.githubusercontent.com/AngelGonePro/wg-vpn-gateway/refs/heads/main/wg-vpn-gateway.zip .`
+`./deploy-update.sh https://github.com/AngelGonePro/wireguard-upstream-vpn/raw/refs/heads/main/wg-vpn-gateway.zip .`
 
 ## Kill switch (`KILLSWITCH=true`, the default)
 
