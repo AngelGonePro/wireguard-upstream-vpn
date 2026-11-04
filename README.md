@@ -61,7 +61,25 @@ by the gateway's kill switch, but it gets no bypasses of its own.
 | Any connection arriving from outside, including ones already open when the gateway starts | Real IP |
 | `BYPASS_OUT_TCP_PORTS` / `BYPASS_OUT_UDP_PORTS` (default: TCP 22) | Real IP |
 | `BYPASS_DESTINATIONS` (other VPSes, or local networks only reachable through your router) | Real IP / normal network |
+| `SPLIT_TUNNEL_DESTINATIONS` | The second WireGuard config |
 | Directly connected networks (LAN, Docker networks, VPN-server client subnets), link-local, multicast, broadcast | Local, unchanged |
+
+## Split tunnel: a second WireGuard config for chosen IPs
+
+Everything goes through the main config (`config/wg.conf`, e.g. a fast VPN
+provider), except the IPs in `SPLIT_TUNNEL_DESTINATIONS`, which go through a
+second config (`config/wg-split.conf`, e.g. your own server's WireGuard):
+
+```
+SPLIT_TUNNEL_DESTINATIONS=192.168.209.180,45.79.25.46
+```
+
+- In gateway mode the client VMs use it too; nothing to set on them.
+- If the second tunnel is down, those IPs can't be reached until it's back.
+  They're never sent from your real IP.
+- Bypasses still win. With the default `BYPASS_OUT_TCP_PORTS=22`, SSH to
+  those IPs uses your real IP.
+- Change the IPs in `.env` and run the install command again.
 
 ## Kill switch (`KILLSWITCH=true`)
 
