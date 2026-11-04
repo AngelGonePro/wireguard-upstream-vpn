@@ -145,6 +145,13 @@ it before encryption.
     it blocking) or `SURICATA_DISABLE_SIDS` (drop it).
   - **Fails open:** if Suricata is down or out of memory, traffic passes.
     The kill switch is separate.
+  - **Full speed (`SURICATA_BYPASS=true`):** Suricata inspects the part of
+    each connection its rules can match, then the rest of the connection
+    skips it. That part is the requests, hostnames, the TLS handshake and
+    certificate, and the first `SURICATA_STREAM_DEPTH` of plain traffic.
+    After a TLS handshake everything is encrypted and no rule can match
+    anyway. On a 300 MB download, Suricata handled about 700 packets instead
+    of over 500,000.
 - NextDNS (or whatever DNS filtering your VMs use) keeps working through the
   VPN. Inbound and bypassed traffic still go through UniFi as before.
 
