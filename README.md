@@ -75,6 +75,15 @@ keep working, so you can't lock yourself out. To lift the block:
 cd ~/wg-vpn-gateway && docker compose run --rm wg-vpn-gateway release
 ```
 
+The install command downloads through the VPN like everything else. If the
+VPN itself is broken, the download is blocked too, so run the `release`
+command above first, then the install command. The kill switch goes back on
+when the gateway starts.
+
+The gateway counts as healthy only when the VPN server answers *and* traffic
+comes back through it (`HEALTH_PING_TARGET`). A VPN server that's up but not
+forwarding anything shows as down in the install output, Discord and Kuma.
+
 ## Threat blocking (standalone / gateway)
 
 UniFi can't inspect traffic once it's inside the VPN, so the gateway checks
@@ -161,6 +170,10 @@ VM's own OS isn't covered; the install command tells you if Debian's
 
 - `gateway`/`client` mode needs the VMs on the same local network as each
   other. A remote VPS still needs its own `standalone` install.
+- With no `MTU =` line in your WireGuard config, the tunnel MTU is set to
+  the MTU of the interface that reaches the VPN server minus 80 (wg-quick's
+  usual rule). Add `MTU = 1380` (or similar) under `[Interface]` to choose
+  your own.
 - The tunnel interface defaults to `wgvpn`, so it can't collide with a
   WireGuard server interface such as `wg0`.
 - Tailscale's own encrypted traffic, if installed, uses its own routing rules
