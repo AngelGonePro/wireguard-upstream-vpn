@@ -161,7 +161,9 @@ Check status: `docker compose exec wg-vpn-gateway python3 /usr/local/lib/wg-vpn-
 
 - **Discord** (`DISCORD_WEBHOOK_URL`): blocks and would-be blocks, Suricata
   alerts, tunnel down/up, list problems, and update results. Messages are
-  queued and delivered later if the VM is offline or blocked.
+  queued and delivered later if the VM is offline or blocked. To ping a
+  role with every alert, put its ID in `DISCORD_PING_ROLE_IDS`. Only those
+  roles are pinged, never @everyone.
 - **Uptime Kuma** (`KUMA_PUSH_URL`, a Push monitor): a heartbeat every
   minute. It reports down when the tunnel isn't working, and Kuma also
   alerts when heartbeats stop arriving.
