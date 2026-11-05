@@ -13,18 +13,127 @@ keep working. On top of that it adds:
 ## Install / update (same command for both)
 
 ```bash
-curl -fsSL -o /tmp/wg-vpn-gateway.zip https://github.com/AngelGonePro/wireguard-upstream-vpn/raw/refs/heads/main/wg-vpn-gateway.zip && python3 -c "import zipfile;open('/tmp/wg-vpn-deploy.sh','wb').write(zipfile.ZipFile('/tmp/wg-vpn-gateway.zip').read('wg-vpn-gateway/deploy-update.sh'))" && bash /tmp/wg-vpn-deploy.sh /tmp/wg-vpn-gateway.zip ~/wg-vpn-gateway
+curl -fsSL --retry 3 -o /tmp/wg-vpn-gateway.zip https://raw.githubusercontent.com/AngelGonePro/wireguard-upstream-vpn/refs/heads/main/wg-vpn-gateway.zip && python3 -c "import zipfile;open('/tmp/wg-vpn-deploy.sh','wb').write(zipfile.ZipFile('/tmp/wg-vpn-gateway.zip').read('wg-vpn-gateway/deploy-update.sh'))" && bash /tmp/wg-vpn-deploy.sh /tmp/wg-vpn-gateway.zip ~/wg-vpn-gateway
 ```
 
 The first run puts the project in `~/wg-vpn-gateway` and stops. Set it up
 (below), then run the same command again to start it. Every later run
 upgrades in place:
 
-- `.env`, `config/wg.conf`, `state/` and `logs/` are never overwritten.
+- `.env`, `config/wg.conf`, `config/wg-split.conf`, `state/` and `logs/` are
+  never overwritten.
 - Files you edited are left alone and reported.
 - New `.env` keys are added with their defaults.
 - If the tunnel doesn't come up healthy, the gateway is stopped. With the kill
   switch on, it stays blocked rather than using your real IP.
+
+After uploading a new `wg-vpn-gateway.zip` to GitHub, wait 5 minutes before
+running the command: GitHub serves the previous copy for up to 5 minutes.
+
+## Fresh install, step by step
+
+Run everything as root (`sudo -s`). The example addresses are this setup's:
+gateway VM `10.0.0.100` (debian-proxy), Linode `45.79.25.46`.
+
+### 1. Prerequisites (every VM)
+
+```bash
+apt update && apt install -y curl python3
+command -v docker || curl -fsSL https://get.docker.com | sh
+df -h /var /home
+```
+
+If `/var` is its own small partition (a few GB), move Docker's storage off it
+first; see [Disk full on /var](#disk-full-on-var-no-space-left-on-device).
+
+### 2. The gateway VM
+
+1. Download the files (first run, starts nothing):
+   ```bash
+   curl -fsSL --retry 3 -o /tmp/wg-vpn-gateway.zip https://raw.githubusercontent.com/AngelGonePro/wireguard-upstream-vpn/refs/heads/main/wg-vpn-gateway.zip && python3 -c "import zipfile;open('/tmp/wg-vpn-deploy.sh','wb').write(zipfile.ZipFile('/tmp/wg-vpn-gateway.zip').read('wg-vpn-gateway/deploy-update.sh'))" && bash /tmp/wg-vpn-deploy.sh /tmp/wg-vpn-gateway.zip ~/wg-vpn-gateway
+   ```
+2. Put the VPN provider's WireGuard config (e.g. Windscribe) in place:
+   ```bash
+   nano ~/wg-vpn-gateway/config/wg.conf
+   ```
+3. Optional: a second WireGuard config for chosen IPs only (e.g. your
+   StratumVPN config, used just for the Linode):
+   ```bash
+   nano ~/wg-vpn-gateway/config/wg-split.conf
+   ```
+4. Settings:
+   ```bash
+   nano ~/wg-vpn-gateway/.env
+   ```
+   | Key | This setup |
+   |---|---|
+   | `MODE` | `gateway` |
+   | `GATEWAY_CLIENTS` | `10.0.0.50=nextcloud,10.0.0.152=panel,...` (every VM that may use it) |
+   | `COMPOSE_PROFILES` | `suricata,autoupdate,dashboard` |
+   | `SPLIT_TUNNEL_DESTINATIONS` | `192.168.209.180,45.79.25.46` (only with step 3) |
+   | `DISCORD_WEBHOOK_URL`, `DISCORD_PING_ROLE_IDS`, `KUMA_PUSH_URL` | optional alerts |
+5. Start it: run the install command from step 1 again. It ends with
+   `ok — 1.1.1.1 answers through wgvpn`.
+6. Check:
+   ```bash
+   cd ~/wg-vpn-gateway && docker compose ps
+   docker compose exec wg-vpn-gateway python3 /usr/local/lib/wg-vpn-gateway/guardlib.py status
+   ```
+
+### 3. Each client VM
+
+1. Run the install command once (downloads, starts nothing).
+2. `nano ~/wg-vpn-gateway/.env` and set `MODE=client`,
+   `GATEWAY_IP=10.0.0.100` and `COMPOSE_PROFILES=autoupdate`.
+3. Make sure this VM's IP is in the gateway's `GATEWAY_CLIENTS` (re-run the
+   install command on the gateway after changing it).
+4. Run the install command again.
+5. Check it goes through the VPN: `curl -s https://ifconfig.me; echo`. It
+   should print the VPN's address, not your home IP.
+
+### 4. Threat map
+
+With `dashboard` in `COMPOSE_PROFILES` it's already running. Open
+`http://10.0.0.100:8090` from your LAN. Countries appear within a minute:
+
+```bash
+docker logs wg-vpn-gateway-dashboard-collector 2>&1 | grep -iE 'country|upstream' | tail -3
+```
+
+### 5. Add the Linode's blocks to the map (optional)
+
+Needs the split tunnel (step 2.3) and the Linode blocklist from
+docker-compose-proxy (`linode-nginx-stack`, `firewall` profile).
+
+1. **On the Linode**, turn on its read-only stats and copy the token it prints:
+   ```bash
+   cd ~/linode-nginx-stack && TOK=$(openssl rand -hex 24) && sed -i "s|^BLOCKLIST_STATS_LISTEN=.*|BLOCKLIST_STATS_LISTEN=192.168.209.180:9180|; s|^BLOCKLIST_STATS_TOKEN=.*|BLOCKLIST_STATS_TOKEN=$TOK|" .env && docker compose up -d blocklist && sleep 15 && docker logs blocklist --tail 2; echo "TOKEN: $TOK"
+   ```
+   It should say `stats endpoint listening on 192.168.209.180:9180`.
+2. **On the gateway VM**, with that token in place of `PASTE_TOKEN`:
+   ```bash
+   cd ~/wg-vpn-gateway && TOK=PASTE_TOKEN && sed -i "s|^DASHBOARD_UPSTREAM_URL=.*|DASHBOARD_UPSTREAM_URL=http://192.168.209.180:9180/stats|; s|^DASHBOARD_UPSTREAM_TOKEN=.*|DASHBOARD_UPSTREAM_TOKEN=$TOK|" .env && docker compose up -d
+   ```
+3. Check, a minute later:
+   ```bash
+   docker logs wg-vpn-gateway-dashboard-collector 2>&1 | grep -i upstream | tail -1
+   ```
+   `upstream: ok` means it's working, and the `linode` badge on the map turns
+   green.
+
+Why `192.168.209.180` and not the Linode's WireGuard address `10.13.13.1`:
+StratumVPN sends every reply *from* `10.13.13.0/24` out through Windscribe,
+so the Linode never answers on `10.13.13.1`. `192.168.209.180` is also on the
+Linode, is already in the split tunnel, and its replies come back normally.
+
+### 6. Publish the threat map (optional)
+
+1. In home nginx-ui (`http://10.0.0.100:9001`): **Sites → Add Site**, paste
+   `~/proxy-nginx/nginx-sites/threatmap.conf` (from docker-compose-proxy),
+   save and enable.
+2. Cloudflare Zero Trust → your tunnel → **Public hostname**:
+   `threatmap.cosmoscraft.net`, type **HTTP**, URL `10.0.0.100:80`.
+3. Open `https://threatmap.cosmoscraft.net`.
 
 ## Modes (`MODE` in `.env`)
 
@@ -157,6 +266,60 @@ it before encryption.
 
 Check status: `docker compose exec wg-vpn-gateway python3 /usr/local/lib/wg-vpn-gateway/guardlib.py status`
 
+## Threat map (`COMPOSE_PROFILES` includes `dashboard`)
+
+A read-only web page on this VM, at `http://<this VM>:8090` (`DASHBOARD_PORT`):
+
+- a world map coloured by blocked attempts per country
+- rankings of the addresses and countries that tried most, and the latest blocks
+- views for: everything, inbound attackers, outbound (which VM tried to reach
+  a bad address), Suricata, and each source
+
+**Where the data comes from**
+
+- **This gateway:** blocklist hits in both directions and Suricata
+  blocks/alerts. The guard already counts these; no extra logging is added.
+- **Optionally, an upstream host** such as your Linode. Set:
+  - `DASHBOARD_UPSTREAM_URL`: its blocklist's read-only stats endpoint, e.g.
+    `http://192.168.209.180:9180/stats`. That address must be in
+    `SPLIT_TUNNEL_DESTINATIONS`, so it's fetched over your own WireGuard (see
+    [step 5](#5-add-the-linodes-blocks-to-the-map-optional)).
+  - `DASHBOARD_UPSTREAM_TOKEN`: the same token as the Linode's
+    `BLOCKLIST_STATS_TOKEN`.
+
+  The Linode keeps nothing on disk: the counts live only in kernel memory, and
+  the history is kept here. Without an upstream, the page shows this gateway's
+  data only.
+
+**History.** Kept `DASHBOARD_RETENTION_DAYS` (default 7) days, only on this
+VM, then deleted. Countries come from a local copy of DB-IP's free
+IP-to-Country database (CC BY 4.0), refreshed monthly — from DB-IP, or
+the same data's copy on GitHub when DB-IP refuses your VPN's address. Viewing the page sends
+nothing to any outside service.
+
+**Counting.** An *attempt* is a blocked new-connection packet, so a client that
+retries its connection counts once per try.
+
+**Security.**
+
+- The page has no forms, logins, uploads or settings: it only serves fixed
+  files with a strict Content-Security-Policy. All data is rendered as text.
+- The two containers (collector and web server) run as an unprivileged user,
+  with no Linux capabilities, `no-new-privileges`, read-only filesystems and
+  no Docker socket.
+- The web server can only *read* the summary the collector writes. The
+  collector only writes its own `state/dashboard` folder.
+- Caps: collector 96 MB, web server 48 MB, a quarter of a CPU each. They
+  measured about 24 MB and 20 MB.
+- It's reachable on your LAN only, unless you forward the port. To limit it
+  to one interface, set `DASHBOARD_BIND` to that address.
+
+**Behind your reverse proxy.** docker-compose-proxy ships
+`proxy-nginx/nginx-sites/threatmap.conf` for home nginx-ui: the map is open to
+everyone at `threatmap.cosmoscraft.net`, on port 80 for Cloudflare Tunnel and
+port 443 for local visits. nginx lets only GET through and refuses request
+bodies.
+
 ## Alerts and logs
 
 - **Discord** (`DISCORD_WEBHOOK_URL`): blocks and would-be blocks, Suricata
@@ -206,3 +369,50 @@ VM's own OS isn't covered; the install command tells you if Debian's
 - Tailscale's own encrypted traffic, if installed, uses its own routing rules
   ahead of this gateway's, so it keeps using the real IP.
 - Blocklist data © The Spamhaus Project, and abuse.ch where enabled.
+
+## Troubleshooting
+
+### Disk full on /var ("no space left on device")
+
+Debian can put `/var` on its own small partition, and Docker keeps everything
+under `/var/lib/docker` and `/var/lib/containerd`. Check with `df -h /var /home`.
+To move Docker to `/home` (all containers stop for a few minutes, then start
+again):
+
+```bash
+systemctl stop docker.socket docker containerd && \
+mkdir -p /home/docker-data/docker /home/docker-data/containerd && \
+cp -a /var/lib/docker/. /home/docker-data/docker/ && \
+cp -a /var/lib/containerd/. /home/docker-data/containerd/ && \
+mv /var/lib/docker /var/lib/docker.old && mv /var/lib/containerd /var/lib/containerd.old && \
+mkdir /var/lib/docker /var/lib/containerd && \
+echo '/home/docker-data/docker /var/lib/docker none bind 0 0' >> /etc/fstab && \
+echo '/home/docker-data/containerd /var/lib/containerd none bind 0 0' >> /etc/fstab && \
+systemctl daemon-reload && mount /var/lib/docker && mount /var/lib/containerd && \
+systemctl start containerd docker && sleep 15 && docker ps --format '{{.Names}}: {{.Status}}'
+```
+
+If any step fails, the rest is skipped; start Docker again with
+`systemctl start containerd docker`.
+
+When everything shows `Up`, free the old space:
+`rm -rf /var/lib/docker.old /var/lib/containerd.old`
+
+### The install command fails to download
+
+- `504` or another HTTP error from GitHub: run it again; the command already
+  retries 3 times.
+- Nothing downloads at all with the kill switch on: the VPN is down. Run
+  `cd ~/wg-vpn-gateway && docker compose run --rm wg-vpn-gateway release`
+  first, then the install command.
+
+### The map shows "Unknown" countries
+
+The country database hasn't downloaded yet. Restart the collector to retry
+right away, and check its log:
+
+```bash
+docker restart wg-vpn-gateway-dashboard-collector && sleep 30 && docker logs wg-vpn-gateway-dashboard-collector 2>&1 | grep -i country | tail -2
+```
+
+Addresses recorded while it was missing get their country once it's there.
